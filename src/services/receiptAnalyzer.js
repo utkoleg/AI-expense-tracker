@@ -149,7 +149,7 @@ export function buildExpense(groups) {
   });
 
   return {
-    id:       Date.now(),
+    id:       crypto.randomUUID(),
     merchant: groups[0]?.merchant || "Unknown",
     date:     groups[0]?.date || new Date().toISOString().slice(0, 10),
     total:    normalizedGroups.reduce((s, g) => s + g.total, 0),
