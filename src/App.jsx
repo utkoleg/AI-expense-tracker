@@ -70,12 +70,16 @@ export default function App() {
   }, []);
 
   const handleConfirmReceipt = useCallback((editedGroups) => {
-    const exp = buildExpense(editedGroups);
-    addExpense(exp);
-    setPendingGroups(null);
-    clearTimeout(flashTimer.current);
-    setFlash(exp);
-    flashTimer.current = setTimeout(() => setFlash(null), 5000);
+    try {
+      const exp = buildExpense(editedGroups);
+      addExpense(exp);
+      setPendingGroups(null);
+      clearTimeout(flashTimer.current);
+      setFlash(exp);
+      flashTimer.current = setTimeout(() => setFlash(null), 5000);
+    } catch (err) {
+      setErrorMsg(err.message || "Could not save receipt");
+    }
   }, [addExpense]);
 
   const handleInvalidFile = useCallback(() => setShowNotReceipt(true), []);
@@ -146,16 +150,20 @@ export default function App() {
   }, []);
 
   const handleUpdateExpense = useCallback((editedGroups) => {
-    const built = buildExpense(editedGroups);
-    updateExpense(editingExpense.originalId, {
-      ...built,
-      id: editingExpense.originalId,
-      addedAt: editingExpense.originalAddedAt,
-    });
-    setEditingExpense(null);
-    clearTimeout(flashTimer.current);
-    setFlash(built);
-    flashTimer.current = setTimeout(() => setFlash(null), 5000);
+    try {
+      const built = buildExpense(editedGroups);
+      updateExpense(editingExpense.originalId, {
+        ...built,
+        id: editingExpense.originalId,
+        addedAt: editingExpense.originalAddedAt,
+      });
+      setEditingExpense(null);
+      clearTimeout(flashTimer.current);
+      setFlash(built);
+      flashTimer.current = setTimeout(() => setFlash(null), 5000);
+    } catch (err) {
+      setErrorMsg(err.message || "Could not update expense");
+    }
   }, [updateExpense, editingExpense]);
 
   // ── Clear all (replaces window.confirm) ──────────────────────
@@ -194,7 +202,7 @@ export default function App() {
     if (curIdx === -1) return;
     if (dx < 0 && curIdx < NAV.length - 1) setPage(NAV[curIdx + 1].id); // swipe left → next
     if (dx > 0 && curIdx > 0)              setPage(NAV[curIdx - 1].id); // swipe right → prev
-  }, [page, detailExp, pendingGroups, showUpload, stagedImages]);
+  }, [page]);
 
   // ── Navbar subtitle ──────────────────────────────────────────
   const navSubtitle = {

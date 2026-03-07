@@ -73,17 +73,25 @@ export async function analyzeReceipt(images) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let accumulated = "";
+  let sseBuffer = "";
+  let sawDone = false;
 
   try {
-    while (true) {
+    while (!sawDone) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value, { stream: true });
-      for (const line of chunk.split("\n")) {
+      sseBuffer += decoder.decode(value, { stream: true });
+      const lines = sseBuffer.split("\n");
+      sseBuffer = lines.pop() || "";
+
+      for (const line of lines) {
         if (!line.startsWith("data: ")) continue;
         const payload = line.slice(6).trim();
-        if (payload === "[DONE]") break;
+        if (payload === "[DONE]") {
+          sawDone = true;
+          break;
+        }
         try {
           const evt = JSON.parse(payload);
           if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
@@ -124,6 +132,10 @@ export async function analyzeReceipt(images) {
  * @returns {object} expense
  */
 export function buildExpense(groups) {
+  if (!Array.isArray(groups) || groups.length === 0) {
+    throw new Error("Receipt has no line items to save");
+  }
+
   const dominant = groups.reduce((a, b) =>
     (parseFloat(b.total) || 0) > (parseFloat(a.total) || 0) ? b : a, groups[0]);
 

@@ -16,15 +16,27 @@ export function extractJSON(text) {
   if (s < 0 || e < 0) throw new Error("No JSON in response");
   const raw = text.slice(s, e + 1);
 
-  try { return JSON.parse(raw); } catch (_) {}
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // fall through to cleanup parsing
+  }
 
   // Best-effort cleanup for minor formatting issues
-  const clean = raw
-    .replace(/[\u0000-\u001F\u007F]/g, " ")
+  const withoutControls = Array.from(raw, ch => {
+    const code = ch.charCodeAt(0);
+    return (code <= 31 || code === 127) ? " " : ch;
+  }).join("");
+
+  const clean = withoutControls
     .replace(/,\s*}/g, "}")
     .replace(/,\s*]/g, "]");
 
-  try { return JSON.parse(clean); } catch (_) {}
+  try {
+    return JSON.parse(clean);
+  } catch {
+    // keep final error below
+  }
 
   throw new Error("Could not parse AI response");
 }
