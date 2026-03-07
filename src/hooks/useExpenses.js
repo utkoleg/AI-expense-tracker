@@ -41,13 +41,18 @@ export function useExpenses() {
     const totalSpent = expenses.reduce((s, e) => s + e.total, 0);
 
     const catTotals = {};
+    const catCounts = {};
     expenses.forEach(e => {
       if (e.groups) {
         e.groups.forEach(g => {
           catTotals[g.category] = (catTotals[g.category] || 0) + g.total;
         });
+        // Count this expense once per category it appears in
+        const seen = new Set(e.groups.map(g => g.category));
+        seen.forEach(cat => { catCounts[cat] = (catCounts[cat] || 0) + 1; });
       } else {
         catTotals[e.category] = (catTotals[e.category] || 0) + e.total;
+        catCounts[e.category] = (catCounts[e.category] || 0) + 1;
       }
     });
 
@@ -59,9 +64,11 @@ export function useExpenses() {
 
     const topCat = Object.entries(catTotals).sort((a, b) => b[1] - a[1])[0]?.[0];
     const usedCats = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a]);
-    const thisMonth = new Date().toISOString().slice(0, 7);
+    const now = new Date();
+    const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
-    return { totalSpent, catTotals, monthlyTotals, topCat, usedCats, thisMonth };
+
+    return { totalSpent, catTotals, catCounts, monthlyTotals, topCat, usedCats, thisMonth };
   }, [expenses]);
 
   return { expenses, addExpense, updateExpense, deleteExpense, clearAll, reload, stats };

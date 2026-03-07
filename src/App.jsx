@@ -2,7 +2,7 @@ import { useState, useCallback, useRef } from "react";
 import { colors, font, safe } from "./theme";
 import { useExpenses } from "./hooks/useExpenses";
 import { useCamera } from "./hooks/useCamera";
-import { analyzeReceipt, buildExpense } from "./services/receiptAnalyzer";
+import { useReceiptFlow } from "./hooks/useReceiptFlow";
 
 import HomePage           from "./pages/HomePage";
 import CategoriesPage     from "./pages/CategoriesPage";
@@ -31,63 +31,23 @@ export default function App() {
   const [activeCat,      setActiveCat]     = useState(null);
 
   // ── UI state ─────────────────────────────────────────────────
-  const [loading,        setLoading]       = useState(false);
-  const [flash,          setFlash]         = useState(null);
   const [detailExp,      setDetailExp]     = useState(null);
   const [detailCatFilter, setDetailCatFilter] = useState(null);
   const [deleteTarget,   setDeleteTarget]  = useState(null); // expense id
   const [showUpload,     setShowUpload]    = useState(false);
   const [showNotReceipt, setShowNotReceipt] = useState(false);
   const [errorMsg,       setErrorMsg]      = useState(null);
-  const [pendingGroups,  setPendingGroups] = useState(null);
-  const [editingExpense, setEditingExpense] = useState(null); // expense being edited
-  const [stagedImages,   setStagedImages]  = useState([]); // [{b64, mediaType}]
-  const flashTimer = useRef(null);
 
-  // ── Receipt analysis ─────────────────────────────────────────
-  // Each capture just stages the image; user taps Analyze when ready.
-  const handleCapture = useCallback((b64, mediaType) => {
-    setStagedImages(prev => [...prev, { b64, mediaType }]);
-  }, []);
-
-  const handleAnalyze = useCallback(async (images) => {
-    setLoading(true);
-    try {
-      const result = await analyzeReceipt(images);
-      if (result.not_receipt) {
-        setShowNotReceipt(true);
-        setStagedImages([]);
-        return;
-      }
-      const groups = Array.isArray(result) ? result : [result];
-      setPendingGroups(groups);
-      setStagedImages([]);
-    } catch (err) {
-      if (err.name === "TimeoutError" || err.name === "AbortError") {
-        setErrorMsg("Request timed out. Please check your connection and try again.");
-      } else {
-        setErrorMsg(err.message);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const handleConfirmReceipt = useCallback((editedGroups) => {
-    try {
-      const exp = buildExpense(editedGroups);
-      addExpense(exp);
-      setPendingGroups(null);
-      clearTimeout(flashTimer.current);
-      setFlash(exp);
-      flashTimer.current = setTimeout(() => setFlash(null), 5000);
-    } catch (err) {
-      setErrorMsg(err.message || "Could not save receipt");
-    }
-  }, [addExpense]);
+  // ── Receipt flow ─────────────────────────────────────────────
+  const flow = useReceiptFlow({
+    addExpense,
+    updateExpense,
+    onNotReceipt: () => setShowNotReceipt(true),
+    onError: setErrorMsg,
+  });
 
   const handleInvalidFile = useCallback(() => setShowNotReceipt(true), []);
-  const camera = useCamera(handleCapture, handleInvalidFile);
+  const camera = useCamera(flow.handleCapture, handleInvalidFile);
 
   // iOS requires the webview overlay (the sheet) to be fully dismissed
   // before Capacitor can present the native camera or photo picker.
@@ -130,45 +90,10 @@ export default function App() {
 
   // ── Edit flow ────────────────────────────────────────────────
   const handleEditPress = useCallback((expense) => {
-    // Convert saved expense back to the groups format ReceiptConfirm expects
-    const groups = expense.groups
-      ? expense.groups.map(g => ({
-          merchant: expense.merchant,
-          date: expense.date,
-          currency: expense.currency,
-          notes: expense.notes,
-          category: g.category,
-          items: g.items,
-        }))
-      : [{
-          merchant: expense.merchant,
-          date: expense.date,
-          currency: expense.currency,
-          notes: expense.notes,
-          category: expense.category,
-          items: expense.items,
-        }];
     setDetailExp(null);
     setDetailCatFilter(null);
-    setEditingExpense({ originalId: expense.id, originalAddedAt: expense.addedAt, groups });
-  }, []);
-
-  const handleUpdateExpense = useCallback((editedGroups) => {
-    try {
-      const built = buildExpense(editedGroups);
-      updateExpense(editingExpense.originalId, {
-        ...built,
-        id: editingExpense.originalId,
-        addedAt: editingExpense.originalAddedAt,
-      });
-      setEditingExpense(null);
-      clearTimeout(flashTimer.current);
-      setFlash(built);
-      flashTimer.current = setTimeout(() => setFlash(null), 5000);
-    } catch (err) {
-      setErrorMsg(err.message || "Could not update expense");
-    }
-  }, [updateExpense, editingExpense]);
+    flow.handleEditPress(expense);
+  }, [flow.handleEditPress]);
 
   // ── Clear all (replaces window.confirm) ──────────────────────
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -190,9 +115,9 @@ export default function App() {
   const swipeStart = useRef(null);
   const onSwipeTouchStart = useCallback((e) => {
     // Ignore if any overlay is open
-    if (detailExp || pendingGroups || showUpload || stagedImages.length > 0) return;
+    if (detailExp || flow.pendingGroups || showUpload || flow.stagedImages.length > 0) return;
     swipeStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-  }, [detailExp, pendingGroups, showUpload, stagedImages]);
+  }, [detailExp, flow.pendingGroups, showUpload, flow.stagedImages]);
 
   const onSwipeTouchEnd = useCallback((e) => {
     if (!swipeStart.current) return;
@@ -260,8 +185,8 @@ export default function App() {
           <HomePage
             expenses={expenses}
             stats={stats}
-            loading={loading}
-            flash={flash}
+            loading={flow.loading}
+            flash={flow.flash}
             onScanPress={() => setShowUpload(true)}
             onExpensePress={setDetailExp}
             onDeletePress={handleDeletePress}
@@ -389,29 +314,29 @@ export default function App() {
         />
       )}
 
-      {stagedImages.length > 0 && !loading && !showUpload && (
+      {flow.stagedImages.length > 0 && !flow.loading && !showUpload && (
         <ImageStaging
-          images={stagedImages}
+          images={flow.stagedImages}
           onAddMore={() => setShowUpload(true)}
-          onRemove={(i) => setStagedImages(prev => prev.filter((_, idx) => idx !== i))}
-          onAnalyze={() => handleAnalyze(stagedImages)}
-          onCancel={() => setStagedImages([])}
+          onRemove={flow.removeStaged}
+          onAnalyze={() => flow.handleAnalyze(flow.stagedImages)}
+          onCancel={flow.clearStaged}
         />
       )}
 
-      {pendingGroups && (
+      {flow.pendingGroups && (
         <ReceiptConfirm
-          groups={pendingGroups}
-          onConfirm={handleConfirmReceipt}
-          onDiscard={() => setPendingGroups(null)}
+          groups={flow.pendingGroups}
+          onConfirm={flow.handleConfirmReceipt}
+          onDiscard={flow.discardPending}
         />
       )}
 
-      {editingExpense && (
+      {flow.editingExpense && (
         <ReceiptConfirm
-          groups={editingExpense.groups}
-          onConfirm={handleUpdateExpense}
-          onDiscard={() => setEditingExpense(null)}
+          groups={flow.editingExpense.groups}
+          onConfirm={flow.handleUpdateExpense}
+          onDiscard={flow.discardEdit}
         />
       )}
 

@@ -29,8 +29,8 @@ function SkeletonCard() {
   );
 }
 
-export default function CategoriesPage({ expenses, stats, onCategoryPress, onRefresh }) {
-  const { usedCats, catTotals, totalSpent } = stats;
+export default function CategoriesPage({ stats, onCategoryPress, onRefresh }) {
+  const { usedCats, catTotals, catCounts, totalSpent } = stats;
   const [ready, setReady] = useState(false);
   const scrollRef = useRef(null);
 
@@ -60,9 +60,7 @@ export default function CategoriesPage({ expenses, stats, onCategoryPress, onRef
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {usedCats.map(cat => {
             const catTotal = catTotals[cat] || 0;
-            const count = expenses.filter(e =>
-              e.category === cat || e.groups?.some(g => g.category === cat)
-            ).length;
+            const count = catCounts[cat] || 0;
             const pct = totalSpent > 0 ? (catTotal / totalSpent) * 100 : 0;
             const c = CATS[cat] || CATS["Other"];
 
