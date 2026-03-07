@@ -27,7 +27,7 @@ Extract ALL line items. Never collapse multiple categories into one.`;
  * @param {Array<{b64: string, mediaType: string}>} images
  * @returns {Promise<{not_receipt: true} | object[]>}
  */
-export async function analyzeReceipt(images) {
+export async function analyzeReceipt(images, { signal } = {}) {
   if (!API_KEY) {
     throw new Error("No API key configured. Add VITE_ANTHROPIC_KEY to your .env file.");
   }
@@ -41,8 +41,14 @@ export async function analyzeReceipt(images) {
     ? `These ${images.length} images are different pages/parts of the SAME receipt. Treat them as one document and extract all items across all pages.\n\n${PROMPT}`
     : PROMPT;
 
+  const timeout = AbortSignal.timeout(60_000);
+  const combined = signal
+    ? AbortSignal.any([signal, timeout])
+    : timeout;
+
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
+    signal: combined,
     headers: {
       "Content-Type": "application/json",
       "x-api-key": API_KEY,

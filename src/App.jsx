@@ -63,7 +63,11 @@ export default function App() {
       setPendingGroups(groups);
       setStagedImages([]);
     } catch (err) {
-      setErrorMsg(err.message);
+      if (err.name === "TimeoutError" || err.name === "AbortError") {
+        setErrorMsg("Request timed out. Please check your connection and try again.");
+      } else {
+        setErrorMsg(err.message);
+      }
     } finally {
       setLoading(false);
     }
