@@ -17,7 +17,8 @@ export function useReceiptFlow({ addExpense, updateExpense, onNotReceipt, onErro
   const [pendingGroups,  setPendingGroups] = useState(null);
   const [editingExpense, setEditingExpense] = useState(null);
   const [flash,          setFlash]         = useState(null);
-  const flashTimer = useRef(null);
+  const flashTimer    = useRef(null);
+  const analyzeAbort  = useRef(null);
 
   const setFlashBriefly = useCallback((exp) => {
     clearTimeout(flashTimer.current);
@@ -38,9 +39,14 @@ export function useReceiptFlow({ addExpense, updateExpense, onNotReceipt, onErro
 
   // ── Analyze ──────────────────────────────────────────────────
   const handleAnalyze = useCallback(async (images) => {
+    // Abort any in-flight request before starting a new one
+    analyzeAbort.current?.abort();
+    const controller = new AbortController();
+    analyzeAbort.current = controller;
+
     setLoading(true);
     try {
-      const result = await analyzeReceipt(images);
+      const result = await analyzeReceipt(images, { signal: controller.signal });
       if (result.not_receipt) {
         setStagedImages([]);
         onNotReceipt();
@@ -50,13 +56,17 @@ export function useReceiptFlow({ addExpense, updateExpense, onNotReceipt, onErro
       setPendingGroups(groups);
       setStagedImages([]);
     } catch (err) {
-      if (err.name === "TimeoutError" || err.name === "AbortError") {
+      if (err.name === "TimeoutError") {
         onError("Request timed out. Please check your connection and try again.");
+      } else if (err.name === "AbortError") {
+        // Expected when user starts another analysis; do not show an error.
+        return;
       } else {
         onError(err.message);
       }
     } finally {
       setLoading(false);
+      if (analyzeAbort.current === controller) analyzeAbort.current = null;
     }
   }, [onNotReceipt, onError]);
 

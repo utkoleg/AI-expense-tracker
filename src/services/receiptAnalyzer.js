@@ -41,94 +41,113 @@ export async function analyzeReceipt(images, { signal } = {}) {
     ? `These ${images.length} images are different pages/parts of the SAME receipt. Treat them as one document and extract all items across all pages.\n\n${PROMPT}`
     : PROMPT;
 
-  const timeout = AbortSignal.timeout(60_000);
-  const combined = signal
-    ? AbortSignal.any([signal, timeout])
-    : timeout;
-
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    signal: combined,
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": API_KEY,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 4000,
-      stream: true,
-      messages: [{
-        role: "user",
-        content: [
-          ...imageBlocks,
-          { type: "text", text: promptText },
-        ],
-      }],
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || `API error ${res.status}`);
+  // AbortSignal.timeout / AbortSignal.any are not available on older WKWebView
+  // (Safari < 16.4 / < 17.4). Use an AbortController + setTimeout fallback instead.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    const err = new DOMException("Request timed out", "TimeoutError");
+    controller.abort(err);
+  }, 60_000);
+  let onAbort;
+  if (signal) {
+    // Mirror the caller's signal into our controller
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+    } else {
+      onAbort = () => controller.abort(signal.reason);
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
   }
-
-  // Stream the response and stop as soon as we have valid complete JSON.
-  // This way simple receipts naturally use fewer tokens.
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let accumulated = "";
-  let sseBuffer = "";
-  let sawDone = false;
+  const combined = controller.signal;
 
   try {
-    while (!sawDone) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      signal: combined,
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": API_KEY,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 4000,
+        stream: true,
+        messages: [{
+          role: "user",
+          content: [
+            ...imageBlocks,
+            { type: "text", text: promptText },
+          ],
+        }],
+      }),
+    });
 
-      sseBuffer += decoder.decode(value, { stream: true });
-      const lines = sseBuffer.split("\n");
-      sseBuffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const payload = line.slice(6).trim();
-        if (payload === "[DONE]") {
-          sawDone = true;
-          break;
-        }
-        try {
-          const evt = JSON.parse(payload);
-          if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
-            accumulated += evt.delta.text;
-          } else if (evt.type === "error") {
-            throw new Error(evt.error?.message || "Stream error");
-          }
-        } catch (e) {
-          if (e.message === "Stream error") throw e;
-          // ignore JSON parse errors for malformed SSE lines
-        }
-      }
-
-      // Stop streaming as soon as we have parseable JSON
-      try {
-        const result = extractJSON(accumulated);
-        reader.cancel();
-        if (!Array.isArray(result)) return result;
-        return result;
-      } catch {
-        // incomplete — keep reading
-      }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `API error ${res.status}`);
     }
-  } finally {
-    reader.cancel();
-  }
 
-  // Fallback: parse whatever we accumulated
-  const result = extractJSON(accumulated);
-  if (!Array.isArray(result)) return result;
-  return result;
+    // Stream the response and stop as soon as we have valid complete JSON.
+    // This way simple receipts naturally use fewer tokens.
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let accumulated = "";
+    let sseBuffer = "";
+    let sawDone = false;
+
+    try {
+      while (!sawDone) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split("\n");
+        sseBuffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = line.slice(6).trim();
+          if (payload === "[DONE]") {
+            sawDone = true;
+            break;
+          }
+          try {
+            const evt = JSON.parse(payload);
+            if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
+              accumulated += evt.delta.text;
+            } else if (evt.type === "error") {
+              throw new Error(evt.error?.message || "Stream error");
+            }
+          } catch (e) {
+            if (e.message === "Stream error") throw e;
+            // ignore JSON parse errors for malformed SSE lines
+          }
+        }
+
+        // Stop streaming as soon as we have parseable JSON
+        try {
+          const result = extractJSON(accumulated);
+          reader.cancel();
+          if (!Array.isArray(result)) return result;
+          return result;
+        } catch {
+          // incomplete — keep reading
+        }
+      }
+    } finally {
+      reader.cancel();
+    }
+
+    // Fallback: parse whatever we accumulated
+    const result = extractJSON(accumulated);
+    if (!Array.isArray(result)) return result;
+    return result;
+  } finally {
+    clearTimeout(timeoutId);
+    if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+  }
 }
 
 /**

@@ -48,6 +48,7 @@ export default function App() {
 
   const handleInvalidFile = useCallback(() => setShowNotReceipt(true), []);
   const camera = useCamera(flow.handleCapture, handleInvalidFile);
+  const { fileRef, handleFileChange } = camera;
 
   // iOS requires the webview overlay (the sheet) to be fully dismissed
   // before Capacitor can present the native camera or photo picker.
@@ -89,11 +90,12 @@ export default function App() {
   }, [deleteExpense, deleteTarget, detailExp]);
 
   // ── Edit flow ────────────────────────────────────────────────
+  const { handleEditPress: flowHandleEditPress } = flow;
   const handleEditPress = useCallback((expense) => {
     setDetailExp(null);
     setDetailCatFilter(null);
-    flow.handleEditPress(expense);
-  }, [flow.handleEditPress]);
+    flowHandleEditPress(expense);
+  }, [flowHandleEditPress]);
 
   // ── Clear all (replaces window.confirm) ──────────────────────
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -295,11 +297,11 @@ export default function App() {
 
       {/* Hidden file input for web fallback */}
       <input
-        ref={camera.fileRef}
+        ref={fileRef}
         type="file"
         accept="image/*"
         style={{ display: "none" }}
-        onChange={camera.handleFileChange}
+        onChange={handleFileChange}
         aria-hidden="true"
       />
 
